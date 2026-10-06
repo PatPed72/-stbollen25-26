@@ -3,13 +3,10 @@ import pandas as pd
 import json
 import os
 
-# Din övriga Python-kod klistras in här...
-import streamlit as st
-import pandas as pd
-import json
-import os
-
 st.set_page_config(page_title="Handbollsturnering", page_icon="🤾", layout="centered")
+
+# VÄLJ DITT LÖSENORD HÄR
+ADMIN_PASSWORD = "handboll123"
 
 # Alla 28 lag
 TEAMS = [
@@ -24,11 +21,13 @@ TEAMS = [
 
 DATA_FILE = "handbollsdata.json"
 
-# Ladda sparad data
 def load_data():
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
     return {f"Omgång {i}": {} for i in range(1, 5)}
 
 def save_data(data):
@@ -39,40 +38,13 @@ data = load_data()
 
 st.title("🤾 Totaltabell - Handboll")
 
-# Flikar för Registrering och Totaltabell
-tab1, tab2 = st.tabs(["📊 Totaltabell", "⚙️ Registrera resultat"])
+# Flikar
+tab1, tab2 = st.tabs(["📊 Totaltabell", "🔒 Registrera resultat (Låst)"])
 
-with tab2:
-    st.header("Registrera resultat")
-    selected_round = st.selectbox("Välj omgång", [f"Omgång {i}" for i in range(1, 5)])
-    selected_team = st.selectbox("Välj lag", TEAMS)
-
-    # Hämtar befintliga värden om de finns
-    current_stats = data.get(selected_round, {}).get(selected_team, {"S": 0, "V": 0, "O": 0, "F": 0, "GM": 0, "IM": 0})
-
-    col1, col2 = st.columns(2)
-    with col1:
-        s = st.number_input("Spelade (S)", min_value=0, value=current_stats["S"])
-        v = st.number_input("Vunna (V)", min_value=0, value=current_stats["V"])
-        o = st.number_input("Oavgjorda (O)", min_value=0, value=current_stats["O"])
-    with col2:
-        f = st.number_input("Förlorade (F)", min_value=0, value=current_stats["F"])
-        gm = st.number_input("Gjorda mål (GM)", min_value=0, value=current_stats["GM"])
-        im = st.number_input("Insläppta mål (IM)", min_value=0, value=current_stats["IM"])
-
-    if st.button("💾 Spara resultat", type="primary"):
-        if selected_round not in data:
-            data[selected_round] = {}
-        data[selected_round][selected_team] = {
-            "S": s, "V": v, "O": o, "F": f, "GM": gm, "IM": im
-        }
-        save_data(data)
-        st.success(f"Resultat sparades för {selected_team} i {selected_round}!")
-
+# FLIK 1: BARA LÄSA (Synlig för alla, inklusive din son)
 with tab1:
     st.caption("Kriterier: 1. Poäng | 2. Målskillnad | 3. Gjorda mål")
     
-    # Beräkna totalstatisik
     totals = {team: {"S": 0, "V": 0, "O": 0, "F": 0, "GM": 0, "IM": 0} for team in TEAMS}
     for r_data in data.values():
         for t, stats in r_data.items():
@@ -96,9 +68,46 @@ with tab1:
             "P": pts
         })
 
-    # Skapa DataFrame och sortera enligt prioriteringsregler
     df = pd.DataFrame(rows)
     df = df.sort_values(by=["P", "MS", "GM"], ascending=[False, False, False]).reset_index(drop=True)
-    df.index += 1  # Starta placering på 1
+    df.index += 1
 
     st.dataframe(df, use_container_width=True)
+
+# FLIK 2: KRÄVER LÖSENORD FÖR ATT REDIGERA
+with tab2:
+    st.header("Registrera resultat")
+    
+    pwd_input = st.text_input("Ange lösenord för att låsa upp redigering:", type="password")
+
+    if pwd_input == ADMIN_PASSWORD:
+        st.success("Lösenord godkänt! Du kan nu spara resultat.")
+        
+        selected_round = st.selectbox("Välj omgång", [f"Omgång {i}" for i in range(1, 5)])
+        selected_team = st.selectbox("Välj lag", TEAMS)
+
+        current_stats = data.get(selected_round, {}).get(selected_team, {"S": 0, "V": 0, "O": 0, "F": 0, "GM": 0, "IM": 0})
+
+        col1, col2 = st.columns(2)
+        with col1:
+            s = st.number_input("Spelade (S)", min_value=0, value=current_stats["S"])
+            v = st.number_input("Vunna (V)", min_value=0, value=current_stats["V"])
+            o = st.number_input("Oavgjorda (O)", min_value=0, value=current_stats["O"])
+        with col2:
+            f = st.number_input("Förlorade (F)", min_value=0, value=current_stats["F"])
+            gm = st.number_input("Gjorda mål (GM)", min_value=0, value=current_stats["GM"])
+            im = st.number_input("Insläppta mål (IM)", min_value=0, value=current_stats["IM"])
+
+        if st.button("💾 Spara resultat", type="primary"):
+            if selected_round not in data:
+                data[selected_round] = {}
+            data[selected_round][selected_team] = {
+                "S": s, "V": v, "O": o, "F": f, "GM": gm, "IM": im
+            }
+            save_data(data)
+            st.success(f"Resultat sparades för {selected_team} i {selected_round}!")
+            st.rerun()
+    elif pwd_input != "":
+        st.error("Fel lösenord.")
+    else:
+        st.info("Endast behöriga kan registrera matcher. Skriv in lösenordet ovan.")
