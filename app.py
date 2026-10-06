@@ -36,7 +36,7 @@ def save_data(data):
 
 data = load_data()
 
-st.title("🤾 Totaltabell - Handboll")
+st.title("🤾 Totaltabell - Östbollen")
 
 # Flikar
 tab1, tab2 = st.tabs(["📊 Totaltabell", "🔒 Registrera resultat (Låst)"])
