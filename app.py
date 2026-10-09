@@ -1,14 +1,48 @@
-import streamlit as st
-import pandas as pd
 import json
 import os
+import shutil
+import streamlit as st
+import pandas as pd
 
-st.set_page_config(page_title="Handbollsturnering", page_icon="🤾", layout="centered")
+# ============================================================
+# INSTÄLLNINGAR & CSS (VÄNSTERSTÄLLNING)
+# ============================================================
 
-# VÄLJ DITT LÖSENORD HÄR
-ADMIN_PASSWORD = "handboll123"
+st.set_page_config(page_title="Handbollsturnering", layout="wide")
 
-# Alla 28 lag
+# CSS för att vänsterställa all text, tabeller och fält
+st.markdown("""
+    <style>
+    /* Vänsterställ all text och tabeller */
+    .stApp, div, p, span, h1, h2, h3, h4, th, td {
+        text-align: left !important;
+    }
+    
+    /* Vänsterställ siffror och text i tabeller */
+    table {
+        text-align: left !important;
+        width: 100%;
+    }
+    th, td {
+        text-align: left !important;
+        padding: 8px !important;
+    }
+    
+    /* Anpassning för nummer-input */
+    input {
+        text-align: left !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ============================================================
+# FILER & KONSTANTER
+# ============================================================
+
+FILNAMN = "handbollstabell.json"
+BACKUP_FIL = "handbollstabell_backup.json"
+PASSWORD = "tumbahkp13"
+
 TEAMS = [
     "Skuru IK", "Skogås HK", "Årsta AIK HF", "Spånga HK", "Lidingö HK",
     "Huddinge HK", "Täby HK 2", "Uppsala HK", "AIK", "Kista SC KFUM",
@@ -19,95 +53,173 @@ TEAMS = [
     "IF Swithiod", "Sollentuna HK"
 ]
 
-DATA_FILE = "handbollsdata.json"
+FIELDS = ["Sp", "V", "O", "F", "Poäng", "Gjorda mål", "Insläppta mål"]
+
+# ============================================================
+# DATAHANTERING
+# ============================================================
+
+def create_empty_data():
+    result = {}
+    for omgang in range(1, 5):
+        result[str(omgang)] = {}
+        for team in TEAMS:
+            result[str(omgang)][team] = {field: 0 for field in FIELDS}
+    return result
 
 def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {f"Omgång {i}": {} for i in range(1, 5)}
+    if not os.path.exists(FILNAMN):
+        return create_empty_data()
+    try:
+        with open(FILNAMN, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            # Säkerställ att alla omgångar och lag finns i strukturen
+            empty = create_empty_data()
+            for r in range(1, 5):
+                r_str = str(r)
+                if r_str in data:
+                    for team in TEAMS:
+                        if team in data[r_str]:
+                            for field in FIELDS:
+                                if field in data[r_str][team]:
+                                    empty[r_str][team][field] = int(data[r_str][team][field])
+            return empty
+    except Exception:
+        return create_empty_data()
 
 def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        if os.path.exists(FILNAMN):
+            shutil.copy2(FILNAMN, BACKUP_FIL)
+        with open(FILNAMN, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception:
+        return False
 
-data = load_data()
+# Läs in data till session state
+if "data" not in st.session_state:
+    st.session_state.data = load_data()
 
-st.title("🤾 Totaltabell - Östbollen")
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
-# Flikar
-tab1, tab2 = st.tabs(["📊 Totaltabell", "🔒 Registrera resultat (Låst)"])
+# ============================================================
+# TOTALTABELL
+# ============================================================
 
-# FLIK 1: BARA LÄSA (Synlig för alla, inklusive din son)
-with tab1:
-    st.caption("Kriterier: 1. Poäng | 2. Målskillnad | 3. Gjorda mål")
+def make_total_table(round_number):
+    totals = {team: {field: 0 for field in FIELDS} for team in TEAMS}
     
-    totals = {team: {"S": 0, "V": 0, "O": 0, "F": 0, "GM": 0, "IM": 0} for team in TEAMS}
-    for r_data in data.values():
-        for t, stats in r_data.items():
-            if t in totals:
-                for k in ["S", "V", "O", "F", "GM", "IM"]:
-                    totals[t][k] += stats.get(k, 0)
-
+    for r in range(1, round_number + 1):
+        r_str = str(r)
+        for team in TEAMS:
+            for field in FIELDS:
+                totals[team][field] += st.session_state.data[r_str][team][field]
+                
     rows = []
-    for team, stats in totals.items():
-        ms = stats["GM"] - stats["IM"]
-        pts = (stats["V"] * 2) + (stats["O"] * 1)
+    for team in TEAMS:
+        made = totals[team]["Gjorda mål"]
+        conceded = totals[team]["Insläppta mål"]
+        difference = made - conceded
+        
         rows.append({
             "Lag": team,
-            "S": stats["S"],
-            "V": stats["V"],
-            "O": stats["O"],
-            "F": stats["F"],
-            "GM": stats["GM"],
-            "IM": stats["IM"],
-            "MS": ms,
-            "P": pts
+            "Sp": totals[team]["Sp"],
+            "V": totals[team]["V"],
+            "O": totals[team]["O"],
+            "F": totals[team]["F"],
+            "Poäng": totals[team]["Poäng"],
+            "Gjorda mål": made,
+            "Insläppta mål": conceded,
+            "Målskillnad": difference
         })
-
-    df = pd.DataFrame(rows)
-    df = df.sort_values(by=["P", "MS", "GM"], ascending=[False, False, False]).reset_index(drop=True)
-    df.index += 1
-
-    st.dataframe(df, use_container_width=True)
-
-# FLIK 2: KRÄVER LÖSENORD FÖR ATT REDIGERA
-with tab2:
-    st.header("Registrera resultat")
-    
-    pwd_input = st.text_input("Ange lösenord för att låsa upp redigering:", type="password")
-
-    if pwd_input == ADMIN_PASSWORD:
-        st.success("Lösenord godkänt! Du kan nu spara resultat.")
         
-        selected_round = st.selectbox("Välj omgång", [f"Omgång {i}" for i in range(1, 5)])
-        selected_team = st.selectbox("Välj lag", TEAMS)
+    # Sortering: Poäng > Målskillnad > Gjorda mål
+    rows.sort(key=lambda x: (x["Poäng"], x["Målskillnad"], x["Gjorda mål"]), reverse=True)
+    return rows
 
-        current_stats = data.get(selected_round, {}).get(selected_team, {"S": 0, "V": 0, "O": 0, "F": 0, "GM": 0, "IM": 0})
+# ============================================================
+# GRÄNSSNITT & FLIKAR
+# ============================================================
 
-        col1, col2 = st.columns(2)
-        with col1:
-            s = st.number_input("Spelade (S)", min_value=0, value=current_stats["S"])
-            v = st.number_input("Vunna (V)", min_value=0, value=current_stats["V"])
-            o = st.number_input("Oavgjorda (O)", min_value=0, value=current_stats["O"])
-        with col2:
-            f = st.number_input("Förlorade (F)", min_value=0, value=current_stats["F"])
-            gm = st.number_input("Gjorda mål (GM)", min_value=0, value=current_stats["GM"])
-            im = st.number_input("Insläppta mål (IM)", min_value=0, value=current_stats["IM"])
+st.title("Handbollsturnering")
 
-        if st.button("💾 Spara resultat", type="primary"):
-            if selected_round not in data:
-                data[selected_round] = {}
-            data[selected_round][selected_team] = {
-                "S": s, "V": v, "O": o, "F": f, "GM": gm, "IM": im
-            }
-            save_data(data)
-            st.success(f"Resultat sparades för {selected_team} i {selected_round}!")
-            st.rerun()
-    elif pwd_input != "":
-        st.error("Fel lösenord.")
+tab1, tab2 = st.tabs(["Totaltabell", "Inmatning"])
+
+# ------------------------------------------------------------
+# FLIK 1: TOTALTABELL
+# ------------------------------------------------------------
+with tab1:
+    st.header("Totaltabell")
+    
+    selected_round = st.selectbox("Visa tabell efter omgång:", options=[1, 2, 3, 4], index=3)
+    
+    table_data = make_total_table(selected_round)
+    df = pd.DataFrame(table_data)
+    df.index = df.index + 1  # Placering från 1
+    
+    # Visa tabell i Streamlit (vänsterställd via HTML/CSS)
+    st.write(df.to_html(classes="table table-striped", justify="left"), unsafe_allow_html=True)
+
+# ------------------------------------------------------------
+# FLIK 2: INMATNING (LÖSENORDSSKYDDAD)
+# ------------------------------------------------------------
+with tab2:
+    st.header("Resultatinmatning")
+    
+    if not st.session_state.authenticated:
+        password_input = st.text_input("Mata in lösenord för att redigera:", type="password")
+        if st.button("Lås upp"):
+            if password_input == PASSWORD:
+                st.session_state.authenticated = True
+                st.success("Lösenord godkänt!")
+                st.rerun()
+            else:
+                st.error("Felaktigt lösenord.")
     else:
-        st.info("Endast behöriga kan registrera matcher. Skriv in lösenordet ovan.")
+        st.success("Inloggad. Du kan nu ändra statistik.")
+        
+        omgang = st.selectbox("Välj omgång:", options=[1, 2, 3, 4], key="inmatning_omgang")
+        omgang_str = str(omgang)
+        
+        selected_team = st.selectbox("Välj lag:", options=TEAMS)
+        
+        st.subheader(f"Statistik för {selected_team} (Omgång {omgang})")
+        
+        current_values = st.session_state.data[omgang_str][selected_team]
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            sp = st.number_input("Spelade matcher (Sp)", min_value=0, value=current_values["Sp"])
+            v = st.number_input("Vinster (V)", min_value=0, value=current_values["V"])
+            o = st.number_input("Oavgjorda (O)", min_value=0, value=current_values["O"])
+            f = st.number_input("Förluster (F)", min_value=0, value=current_values["F"])
+        with col2:
+            poang = st.number_input("Poäng", min_value=0, value=current_values["Poäng"])
+            gjorda = st.number_input("Gjorda mål", min_value=0, value=current_values["Gjorda mål"])
+            inslappta = st.number_input("Insläppta mål", min_value=0, value=current_values["Insläppta mål"])
+            
+        if st.button("Spara ändringar"):
+            # Validering
+            if sp != (v + o + f):
+                st.error(f"Fel: Spelade matcher (Sp = {sp}) måste vara lika med summan av V + O + F ({v + o + f}).")
+            else:
+                st.session_state.data[omgang_str][selected_team] = {
+                    "Sp": int(sp),
+                    "V": int(v),
+                    "O": int(o),
+                    "F": int(f),
+                    "Poäng": int(poang),
+                    "Gjorda mål": int(gjorda),
+                    "Insläppta mål": int(inslappta)
+                }
+                
+                if save_data(st.session_state.data):
+                    st.success(f"Data sparad för {selected_team} i omgång {omgang}!")
+                else:
+                    st.error("Kunde inte spara data till fil.")
+                    
+        if st.button("Logga ut"):
+            st.session_state.authenticated = False
+            st.rerun()
